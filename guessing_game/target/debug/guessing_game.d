@@ -1,0 +1,1 @@
+C:\Users\20202467\Desktop\Repositories\rust-language-book-projects\guessing_game\target\debug\guessing_game.exe: C:\Users\20202467\Desktop\Repositories\rust-language-book-projects\guessing_game\src\main.rs
