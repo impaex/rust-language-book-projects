@@ -1,0 +1,12 @@
+
+# Ignore Rust build artifacts and binaries
+target/
+**/*.exe
+**/*.pdb
+**/*.d
+**/*.rlib
+**/*.rmeta
+**/*.dll
+**/*.so
+**/*.dylib
+Cargo.lock
