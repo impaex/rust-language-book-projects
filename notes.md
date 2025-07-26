@@ -210,3 +210,107 @@ fn main() {
 
 ### Other slices
 Slices exist for arrays, as well as other types of collections.
+
+# Structs
+Compared to tuples, structs name their values. Here's a struct definition:
+```rust
+struct User {
+    active: bool,
+    username: String,
+    email: String,
+    sign_in_count: u64,
+}
+```
+
+Here is an instantiation of the defined struct above:
+```rust
+fn main() {
+    let mut user1 = User {
+        active: true,
+        username: String::from("someusername123"),
+        email: String::from("someone@example.com"),
+        sign_in_count: 1,
+    };
+
+    user1.email = String::from("anotheremail@example.com");
+}
+```
+As seen on the last line, dot notation is used to access values.
+
+We're using the Owned `String` type here, because we want each struct to own all of its data. It is possible for structs to store references, but this requires the use of **lifetimes**.
+
+When you have a parameter or variable with the same name as a value in a struct, you can make use of the Field Init Shorthand and write the following:
+```rust
+fn build_user(email: String, username: String) -> User {
+    User {
+        active: true,
+        username,
+        email,
+        sign_in_count: 1,
+    }
+}
+```
+
+### Struct Update Syntax
+To copy over an instance of a struct, and change only a few variables, we can do the following:
+```rust
+fn main() {
+    // --snip--
+
+    let user2 = User {
+        email: String::from("another@example.com"),
+        ..user1
+    };
+}
+```
+
+Since `user2` copies over `user1`'s `String` value, upon creating `user2`, `user1` is discarded as `user2` becomes the new owner of the `String` data in the heap. This also means that `user1.email`, which has not been moved over, is still accessible. 
+This would not be the case if both `username` and `email` got a new value instead of being copied over, then both `user1` and `user2` would be available.
+
+### Tuple Structs
+Example:
+```rust
+struct Color(i32, i32, i32);
+struct Point(i32, i32, i32);
+
+fn main() {
+    let black = Color(0, 0, 0);
+    let origin = Point(0, 0, 0);
+}
+```
+Unlike normal tuples, tuple structs require you to name the type of the struct when destructuring, e.g.:
+`let Point(x, y, z) = point`.
+
+### Unit-like structs
+Structs without any value. Can be useful to implement traits for types.
+```rust
+struct AlwaysEqual;
+
+fn main() {
+    let subject = AlwaysEqual;
+}
+```
+### Method syntax
+Methods are similar to functions, however methods are defined within the context of a struct (or enum or trait object), and their first parameter is always `self`. 
+
+Methods can share a name with one of the struct fields, the only difference being the invokation, using parentheses behind the name.
+`rect1.width` vs. `rect1.width()`.
+
+#### Associated functions
+Functions (not methods) can also be associated to a struct. These are typically used as constructors, as they don't need a reference to `self`. Example:
+```rust
+impl Rectangle {
+    fn square(size: u32) -> Self {
+        Self {
+            width: size,
+            height: size,
+        }
+    }
+}
+```
+These functions are invokable by using the `::` syntax, e.g.:
+`let sq = Rectangle::square(3);`.
+
+A struct can have multiple `impl` blocks, which are treated as one big one.
+
+
