@@ -530,3 +530,181 @@ fn describe_state_quarter(coin: Coin) -> Option<String> {
     }
 }
 ```
+
+# Packages, Crates and modules
+A crate is the smallest amount of code that the Rust compiler considers at the time. Two types exist, a **binary** crate or a **library** crate. The term "crate" often refers to the latter.
+
+A package is a bundle of one or more crates that provides a set of functionality. A package must contain at least one crate, and can contain as many binary crates as desired, but only one library crate.
+
+When creating a package using `cargo new my-project`, we find a my-project directory containing the cargo.toml and src directory. Cargo.toml does not mention the binary crate found in `src/main.rs`, as it assumes that it is the crate root of a binary crate with the same name as the package. Same holds for a library crate when finding `src/lib.rs`.
+
+If a crate has both a `main.rs` and a `lib.rs`, it has both a binary crate and a library crate with the same name as the package.
+
+A package can contain multiple binary crates by including files in the `src/bin` directory, where each file represents a separate binary crate.
+
+### Modules
+In the crate root file, modules can be declared using `mod garden;`. The compiler will look for the code of this module in the following places:
+- Inline, within curly brackets that replace the semicolon following `mod garden`
+- In the file src/garden.rs
+- In the file src/garden/mod.rs
+
+### Submodules
+In any file other than the crate root, you declare submodules, e.g. `mod vegetables;`. The compiler will look for the code of this submodule in the following places:
+- Inline, directly following `mod vegetables` within curly brackets instead of the semicolon
+- In the file `src/garden/vegetables.rs`
+- In the file `src/garden/vegetables/mod.rs`
+
+### Paths to code in modules
+Once a module is part of your crate, you can refer to code
+in that module from anywhere else in that same crate, as long as the privacy rules allow, using the path to the code. For example, an Asparagus type in the garden vegetables module would be found at `crate::garden::vegetables::Asparagus`.
+
+### Private vs. public
+Code within a module is private from its parent modules by default. To make a module public, declare it with `pub mod` instead of `mod`. This works the same for items within a public module.
+
+### The `use` keyword
+Within a scope, the use keyword creates shortcuts to items to reduce repetition of long paths. In any scope that can refer to `crate::garden::vegetables::Asparagus`, you can create a shortcut with `use crate::garden::vegetables::Asparagus;` and from then on you only need to write `Asparagus` to make use of that type in the scope.
+
+### Paths for referring to an item
+To show Rust where to find an item in the module tree, we can use absolute paths, or relative paths:
+- Absolute paths: starting from the crate root, for code from external crates, this is the crate name, for code from the current crate, we use literal `crate`.
+- Relative paths: starting from the current module, it can use `self`, `super` (referring to a parent module) or an identifier in the current module.
+
+Example:
+```rust
+mod front_of_house {
+    mod hosting {
+        fn add_to_waitlist() {}
+    }
+}
+
+pub fn eat_at_restaurant() {
+    // Absolute path
+    crate::front_of_house::hosting::add_to_waitlist();
+    // Relative path
+    front_of_house::hosting::add_to_waitlist();
+}
+```
+
+To make these function calls compile, we would first need to make the hosting module **and** the function public, by adding the `pub` keyword to it:
+```rust
+mod front_of_house {
+    pub mod hosting {
+        pub fn add_to_waitlist() {}
+    }
+}
+
+pub fn eat_at_restaurant() {
+    // Absolute path
+    crate::front_of_house::hosting::add_to_waitlist();
+    // Relative path
+    front_of_house::hosting::add_to_waitlist();
+}
+```
+
+The `front_of_house` module does not need a `pub` keyword, as it is not a parent module to the `eat_in_restaurant()` function, rather a sibling.
+
+### Making structs and enums public
+Structs and enums can be made public using the `pub` keyword. A struct's fields will need to be made public individually. Example:
+```rust
+mod back_of_house {
+    pub struct Breakfast {
+        pub toast: String,
+        seasonal_fruit: String,
+    }
+    impl Breakfast {
+        pub fn summer(toast: &str) -> Breakfast {
+            Breakfast {
+                toast: String::from(toast),
+                seasonal_fruit: String::from("peaches"),
+            }
+        }
+    }
+}
+pub fn eat_at_restaurant() {
+    // Order a breakfast in the summer with Rye toast.
+    let mut meal = back_of_house::Breakfast::summer("Rye");
+    // Change our mind about what bread we'd like.
+    meal.toast = String::from("Wheat");
+    println!("I'd like {} toast please", meal.toast);
+    // The next line won't compile if we uncomment it; we're not allowed
+    // to see or modify the seasonal fruit that comes with the meal.
+    // meal.seasonal_fruit = String::from("blueberries");
+}
+```
+In contrast, when making an enum public, we make all of its variants public.
+```rust
+mod back_of_house {
+    pub enum Appetizer {
+        Soup,
+        Salad,
+    }
+}
+pub fn eat_at_restaurant() {
+    let order1 = back_of_house::Appetizer::Soup;
+    let order2 = back_of_house::Appetizer::Salad;
+}
+```
+
+### Bringing paths into scope with the `use` keyword
+As mentioned, we can use the `use` keyword to create a shortcut to avoid an otherwise long path. Note that this shortcut is only valid in the same scope of the `use` keyword. Example:
+```rust
+mod front_of_house {
+    pub mod hosting {
+        pub fn add_to_waitlist() {}
+    }
+}
+
+use crate::front_of_house::hosting;
+
+pub fn eat_at_restaurant() {
+    hosting::add_to_waitlist();
+}
+```
+
+We can provide new names for these shortcuts with the `as` keyword as follows:
+```rust
+use std::fmt::Result;
+use std::io::Result as IoResult;
+
+fn function1() -> Result {
+    // --snip--
+}
+
+fn function2() -> IoResult<()> {
+    // --snip--
+}
+```
+
+We can also re-export names using `pub use`. This is called re-exporting because we are bringing an item into scope but also making that item available for others to bring into their scope:
+```rust
+mod front_of_house {
+    pub mod hosting {
+        pub fn add_to_waitlist() {}
+    }
+}
+
+pub use crate::front_of_house::hosting;
+
+pub fn eat_at_restaurant() {
+    hosting::add_to_waitlist();
+}
+```
+
+To `use` external packages, list them in the cargo.toml, and import them at the top of your scope by `use crate_name::some_item_from_it`.
+
+One can combine `use`s from the same crate into one line by changing:
+```rust
+use std::cmp::Ordering;
+use std::io;
+
+use std::io;
+use std::io::Write;
+```
+into
+```rust
+use std::{cmp::Ordering, io};
+
+use std::io::{self, Write};
+```
+
+To bring all public items from a path into scope, we append the `*` glob operator: `use std::collections::*;`.
