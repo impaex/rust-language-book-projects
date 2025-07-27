@@ -708,3 +708,217 @@ use std::io::{self, Write};
 ```
 
 To bring all public items from a path into scope, we append the `*` glob operator: `use std::collections::*;`.
+
+
+# Common collections
+Unlike tuples, collections are stored on the heap, and can therefore grow and shrink in size as the program runs. Here comes a list of 3 of the most used collections.
+
+### Vector
+Allows you to store a variable number of values (of the same type) next to each other.
+```rust
+// Empty vector
+let v: Vec<i32> = Vec::new();
+// Initializing a vector with values using the vec! macro
+let v = vec![1, 2, 3];
+
+// Adding items using the push method
+let mut v = Vec::new();
+v.push(5);
+v.push(6);
+
+// Reading elements can be done using their index or using the get method
+let v = vec![1, 2, 3, 4, 5];
+
+let third: &i32 = &v[2];
+println!("The third element is {third}");
+
+let third: Option<&i32> = v.get(2);
+match third {
+    Some(third) => println!("The third element is {third}"),
+    None => println!("There is no third element."),
+}
+
+// Iterating over immutable and mutable vectors
+// Notice that the reference to the vector that the for loop holds prevents simultaneous modification of the whole vector (due to borrowing rules)
+let v = vec![100, 32, 57];
+for i in &v {
+    println!("{i}");
+}
+
+let mut v = vec![100, 32, 57];
+for i in &mut v {
+    // * is used to dereference the value, which is required in order for the += operator to work
+    *i += 50;
+}
+
+// One can use an enum to store values of different types in a vector
+enum SpreadsheetCell {
+    Int(i32),
+    Float(f64),
+    Text(String),
+}
+
+let row = vec![
+    SpreadsheetCell::Int(3),
+    SpreadsheetCell::Text(String::from("blue")),
+    SpreadsheetCell::Float(10.12),
+];
+```
+
+### String
+A string is a collection of characters.
+```rust
+let mut s = String::new();
+
+let data = "initial contents";
+
+let s = data.to_string();
+
+// The method also works on a literal directly, or on any type that implements the Display trait
+let s = "initial contents".to_string();
+
+// The following works too
+let s = String::from("initial contents");
+
+// Adding string slice to a String
+let mut s = String::from("foo");
+s.push_str("bar");
+
+// Adding character to a String
+let mut s = String::from("lo");
+s.push('l');
+
+// Combining existing Strings
+let s1 = String::from("Hello, ");
+let s2 = String::from("world!");
+let s3 = s1 + &s2; // note s1 has been moved here and can no longer be used
+// The above compiles because the compiler can coerce the &String argument into a &str.
+
+// Using the format! macro, we can combine Strings in more complicated ways
+let s1 = String::from("tic");
+let s2 = String::from("tac");
+let s3 = String::from("toe");
+
+let s = format!("{s1}-{s2}-{s3}");
+```
+Strings are stored in UTF-8 format in bytes. Indexing won't work as some letters take more than 1 byte, meaning one letter would take indices 0 and 1 if indexing a String was a feature in Rust.
+
+Rust provides 3 types of representations of Strings, bytes, scalar values and grapheme clusters.
+
+Instead of indexing, one can slice a string. This means you can select certain bytes using the slice syntax:
+```rust
+let hello = "Здравствуйте";
+let s = &hello[0..4];
+```
+Iterating over strings can be done over unicode scalar values or bytes:
+```rust
+for c in "Зд".chars() {
+    println!("{c}");
+}
+// Resulting in Зд
+
+for b in "Зд".bytes() {
+    println!("{b}");
+}
+// Resulting in 208 151 208 180 (each of the characters in the string is encoded using 2 bytes)
+```
+
+### Hash map
+A hash map allows you to associate a value with a specific key. It’s a particular implementation of the more general data structure called a map.
+
+Create a hash map as follows:
+```rust
+use std::collections::HashMap;
+
+let mut scores = HashMap::new();
+
+scores.insert(String::from("Blue"), 10);
+scores.insert(String::from("Yellow"), 50);
+```
+
+All keys must be of the same type and all values must be of the same type.
+
+Accessing values is done as follows:
+```rust
+use std::collections::HashMap;
+
+let mut scores = HashMap::new();
+
+scores.insert(String::from("Blue"), 10);
+scores.insert(String::from("Yellow"), 50);
+
+let team_name = String::from("Blue");
+// copied() handles the option received from .get() by getting an Option<i32> instead of an Option<&i32>
+// then unwrap_or(0) sets score to 0 if score is none or to the score
+let score = scores.get(&team_name).copied().unwrap_or(0);
+```
+We can also loop through hash maps (note that each pair will be printed in arbitrary order):
+```rust
+use std::collections::HashMap;
+
+let mut scores = HashMap::new();
+
+scores.insert(String::from("Blue"), 10);
+scores.insert(String::from("Yellow"), 50);
+
+for (key, value) in &scores {
+    println!("{key}: {value}");
+}
+```
+Hashmaps are owners of any owned values put in them:
+```rust
+use std::collections::HashMap;
+
+let field_name = String::from("Favorite color");
+let field_value = String::from("Blue");
+
+let mut map = HashMap::new();
+map.insert(field_name, field_value);
+// field_name and field_value are invalid at this point, try using them and
+// see what compiler error you get!
+```
+When inserting references into the hash map, we need to make sure these references are valid for at least as long as the hash map is valid.
+
+To update or overwrite a key, you insert it again:
+```rust
+use std::collections::HashMap;
+
+let mut scores = HashMap::new();
+
+scores.insert(String::from("Blue"), 10);
+scores.insert(String::from("Blue"), 25);
+
+println!("{scores:?}");
+```
+
+To check whether a key has been entered into a hash map, we can use `entry()`:
+```rust
+use std::collections::HashMap;
+
+let mut scores = HashMap::new();
+scores.insert(String::from("Blue"), 10);
+
+scores.entry(String::from("Yellow")).or_insert(50);
+scores.entry(String::from("Blue")).or_insert(50);
+
+println!("{scores:?}");
+```
+
+To update a key based on it's current value, we do:
+```rust
+use std::collections::HashMap;
+
+let text = "hello world wonderful world";
+
+let mut map = HashMap::new();
+
+for word in text.split_whitespace() {
+    let count = map.entry(word).or_insert(0);
+    *count += 1;
+}
+
+println!("{map:?}");
+```
+The `split_whitespace` method returns an iterator over subslices, separated by whitespace, of the value in text. The `or_insert` method returns a mutable reference (`&mut V`) to the value for the specified key. Here, we store that mutable reference in the `count` variable, so in order to assign to that value, we must first dereference `count` using the asterisk (`*`). The mutable reference goes out of scope at the end of the `for` loop, so all of these changes are safe and allowed by the borrowing rules.
+
+By default, hash maps use SipHash as hashing function, which can provide resistance against DoS attacks with hash tables. If not enough, you can create your own.
