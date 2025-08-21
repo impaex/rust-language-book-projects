@@ -922,3 +922,612 @@ println!("{map:?}");
 The `split_whitespace` method returns an iterator over subslices, separated by whitespace, of the value in text. The `or_insert` method returns a mutable reference (`&mut V`) to the value for the specified key. Here, we store that mutable reference in the `count` variable, so in order to assign to that value, we must first dereference `count` using the asterisk (`*`). The mutable reference goes out of scope at the end of the `for` loop, so all of these changes are safe and allowed by the borrowing rules.
 
 By default, hash maps use SipHash as hashing function, which can provide resistance against DoS attacks with hash tables. If not enough, you can create your own.
+
+# Error handling
+Rust has two categories of errors, recoverable and unrecoverable errors. Instead of exceptions-like mechanisms, Rust offers thr `Result<T, E>` type for recoverable errors and the `panic!` macro for unrecoverable errors.
+
+### Unrecoverable errors with `panic!`
+During a panic, Rust starts unwinding the program, walking back up the stack, cleaning up the date from each function it encounters. An alternative is that you make Rust immediately abort, without cleaning up. Cleaning then has to be done by the operating system. If you need to make the resulting binary of a project as small as possible, you switch from unwinding to aborting by addding `panic = 'abort'` to the appropriate `[profile]` sections in the `Cargo.toml` file.
+
+```rust
+fn main() {
+    panic!("crash and burn");
+}
+```
+results in:
+```
+$ cargo run
+   Compiling panic v0.1.0 (file:///projects/panic)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running `target/debug/panic`
+
+thread 'main' panicked at src/main.rs:2:5:
+crash and burn
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+```
+
+### Recoverable errors with `Result`
+Using the `Result` enum, we can handle recoverable errors:
+```rust
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+```
+
+Recall that `T` and `E` are generic type parameters. `T` represents the type of the value that will be returned in a success case, while `E` represents the type of the error that will be returned in a failure case.
+Using a match expression, we can handle both the success and failure case:
+```rust
+use std::fs::File;
+
+fn main() {
+    let greeting_file_result = File::open("hello.txt");
+
+    let greeting_file = match greeting_file_result {
+        Ok(file) => file,
+        Err(error) => panic!("Problem opening the file: {error:?}"),
+    };
+}
+```
+
+However, this implementation panics by no matter what type of error we get. For this, an inner `match` expression can be used:
+```rust
+use std::fs::File;
+use std::io::ErrorKind;
+
+fn main() {
+    let greeting_file_result = File::open("hello.txt");
+
+    let greeting_file = match greeting_file_result {
+        Ok(file) => file,
+        Err(error) => match error.kind() {
+            ErrorKind::NotFound => match File::create("hello.txt") {
+                Ok(fc) => fc,
+                Err(e) => panic!("Problem creating the file: {e:?}"),
+            },
+            _ => {
+                panic!("Problem opening the file: {error:?}");
+            }
+        },
+    };
+}
+```
+
+Many match statements are used here. Instead, using closures and the `unwrap_or_else` method, we can shorten the code to the following:
+```rust
+use std::fs::File;
+use std::io::ErrorKind;
+
+fn main() {
+    let greeting_file = File::open("hello.txt").unwrap_or_else(|error| {
+        if error.kind() == ErrorKind::NotFound {
+            File::create("hello.txt").unwrap_or_else(|error| {
+                panic!("Problem creating the file: {error:?}");
+            })
+        } else {
+            panic!("Problem opening the file: {error:?}");
+        }
+    });
+}
+```
+
+To replicate the functionality of 3 examples back, we can use the `unwrap` shortcut method. It returns the value inside `Ok` if `Result` is `Ok`, and if it's the `Err` variant, it calls the `panic!` macro:
+```rust
+use std::fs::File;
+
+fn main() {
+    let greeting_file = File::open("hello.txt").unwrap();
+}
+```
+
+Using `expect`, we can specify a panic error message next to the functionality of `unwrap`:
+```rust
+use std::fs::File;
+
+fn main() {
+    let greeting_file = File::open("hello.txt")
+        .expect("hello.txt should be included in this project");
+}
+```
+
+Since propagating the error upwards in functions is so common, the `?` operator is introduced:
+```rust
+use std::fs::File;
+use std::io::{self, Read};
+
+fn read_username_from_file() -> Result<String, io::Error> {
+    let mut username_file = File::open("hello.txt")?;
+    let mut username = String::new();
+    username_file.read_to_string(&mut username)?;
+    Ok(username)
+}
+```
+One can shorten this by chaining the method calls:
+```rust
+use std::fs::File;
+use std::io::{self, Read};
+
+fn read_username_from_file() -> Result<String, io::Error> {
+    let mut username = String::new();
+
+    File::open("hello.txt")?.read_to_string(&mut username)?;
+
+    Ok(username)
+}
+```
+This `?` operator can only be used in functions whose return type is compatible with the value the `?` is used on. Besides the `Result` enum, it works on the `Option` enum too.
+
+# Generic Types, Traits and Lifetimes
+Generics are tools for handling duplication of concepts. One can express the behavour of generics or how they relate to other generics without knowing what will be in their place when compiling and running the code.
+
+### Removing duplication by extracting a function
+We'll first remove duplication by extracting a function in a way that doesn't involve generic types by extracting a function that replaces specific values with a placeholder that represents multiple values. Starting code:
+```rust
+fn main() {
+    let number_list = vec![34, 50, 25, 100, 65];
+
+    let mut largest = &number_list[0];
+
+    for number in &number_list {
+        if number > largest {
+            largest = number;
+        }
+    }
+
+    println!("The largest number is {largest}");
+}
+```
+Now, we find the maximum number in two lists by duplicating the code:
+```rust
+fn main() {
+    let number_list = vec![34, 50, 25, 100, 65];
+
+    let mut largest = &number_list[0];
+
+    for number in &number_list {
+        if number > largest {
+            largest = number;
+        }
+    }
+
+    println!("The largest number is {largest}");
+
+    let number_list = vec![102, 34, 6000, 89, 54, 2, 43, 8];
+
+    let mut largest = &number_list[0];
+
+    for number in &number_list {
+        if number > largest {
+            largest = number;
+        }
+    }
+
+    println!("The largest number is {largest}");
+}
+```
+Now, we move this code into a function, to reuse the code:
+```rust
+fn largest(list: &[i32]) -> &i32 {
+    let mut largest = &list[0];
+
+    for item in list {
+        if item > largest {
+            largest = item;
+        }
+    }
+
+    largest
+}
+
+fn main() {
+    let number_list = vec![34, 50, 25, 100, 65];
+
+    let result = largest(&number_list);
+    println!("The largest number is {result}");
+
+    let number_list = vec![102, 34, 6000, 89, 54, 2, 43, 8];
+
+    let result = largest(&number_list);
+    println!("The largest number is {result}");
+}
+```
+
+### Generic data types
+Generics are mostly used to create definitions of function signatures or structs, which can then be used with many different concrete data types.
+
+##### In Function definitions
+We replace the otherwise concrete data types for parameters with generics. Look at the following code which can use generics:
+```rust
+fn largest_i32(list: &[i32]) -> &i32 {
+    let mut largest = &list[0];
+
+    for item in list {
+        if item > largest {
+            largest = item;
+        }
+    }
+
+    largest
+}
+
+fn largest_char(list: &[char]) -> &char {
+    let mut largest = &list[0];
+
+    for item in list {
+        if item > largest {
+            largest = item;
+        }
+    }
+
+    largest
+}
+
+fn main() {
+    let number_list = vec![34, 50, 25, 100, 65];
+
+    let result = largest_i32(&number_list);
+    println!("The largest number is {result}");
+
+    let char_list = vec!['y', 'm', 'a', 'q'];
+
+    let result = largest_char(&char_list);
+    println!("The largest char is {result}");
+}
+```
+
+We'll make one function with the following signature: <br> `fn largest<T>(list: &[T]) -> &T {`
+
+This signature is read as: the function largest is generic over some type T. This function has one parameter named list, which is a slice of values of type T. The largest function will return a reference to a value of the same type T.
+However, since we're making a comparison, the type needs to have a notion of partial ordering. One can define this using the `PartialOrd` trait, which will make the signature look like the following: <br>
+`fn largest<T: std::cmp::PartialOrd>(list: &[T]) -> &T {`
+
+This limits all possible types T can be to types that implement this partial ordering trait.
+
+##### In struct definitions
+Structs can use a generic type parameter in one or more fields using the same `<>` syntax.
+```rust
+struct Point<T> {
+    x: T,
+    y: T,
+}
+
+fn main() {
+    let integer = Point { x: 5, y: 10 };
+    let float = Point { x: 1.0, y: 4.0 };
+}
+```
+This piece of code only specifies one generic type, meaning X and Y need to be of the same type. One can use multiple types by doing:
+```rust
+struct Point<T, U> {
+    x: T,
+    y: U,
+}
+
+fn main() {
+    let both_integer = Point { x: 5, y: 10 };
+    let both_float = Point { x: 1.0, y: 4.0 };
+    let integer_and_float = Point { x: 5, y: 4.0 };
+}
+```
+
+##### In Enum definitions
+The option and result enum from the standard library are good examples:
+```rust
+enum Option<T> {
+    Some(T),
+    None,
+}
+
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+```
+##### In method definitions
+We can implement methods on structs and enums and use generic types in their definitions too:
+```rust
+struct Point<T> {
+    x: T,
+    y: T,
+}
+
+impl<T> Point<T> {
+    fn x(&self) -> &T {
+        &self.x
+    }
+}
+
+fn main() {
+    let p = Point { x: 5, y: 10 };
+
+    println!("p.x = {}", p.x());
+}
+```
+Within generic structs, we can implement methods for just certain concrete types only:
+```rust
+impl Point<f32> {
+    fn distance_from_origin(&self) -> f32 {
+        (self.x.powi(2) + self.y.powi(2)).sqrt()
+    }
+}
+```
+The type `Point<f32>` will have the distance_from_origin method available, other instances of `Point<T>` will not.
+
+A method can also use generic types different from its struct's definition:
+```rust
+struct Point<X1, Y1> {
+    x: X1,
+    y: Y1,
+}
+
+impl<X1, Y1> Point<X1, Y1> {
+    fn mixup<X2, Y2>(self, other: Point<X2, Y2>) -> Point<X1, Y2> {
+        Point {
+            x: self.x,
+            y: other.y,
+        }
+    }
+}
+
+fn main() {
+    let p1 = Point { x: 5, y: 10.4 };
+    let p2 = Point { x: "Hello", y: 'c' };
+
+    let p3 = p1.mixup(p2);
+
+    println!("p3.x = {}, p3.y = {}", p3.x, p3.y);
+}
+```
+
+##### Performance of code using generics
+There is no runtime cost for using generic type parameters, because Rust does monomorphization of the code using generics at compile time. This basically means replacing the generic types for all types used with that generic type, generating code for each used type.
+
+### Traits: defining shared behaviour
+A trait defines the functionality a particular type has and can share with other types.
+
+A type's behaviour consists of the methods we can call on that type. Different types share the same behaviour if we can all the same methods on all of those types. Trait definitions are a way to group method signatures together to define a set of behaviours necessary to accomplish some purpose.
+
+Imagine having two structs, a news article struct and a social media post struct. You want to summarize their contents using a summarize function. You define a public Summary trait as follows:
+```rust
+pub trait Summary {
+    fn summarize(&self) -> String;
+}
+```
+Each type will have to provide their own implementation for the body of the method. The compiler will enforce that any type with the Summary trait will have a method summarize with an identical signature.
+
+To implement this into our structs, we do the following:
+```rust
+pub struct NewsArticle {
+    pub headline: String,
+    pub location: String,
+    pub author: String,
+    pub content: String,
+}
+
+impl Summary for NewsArticle {
+    fn summarize(&self) -> String {
+        format!("{}, by {} ({})", self.headline, self.author, self.location)
+    }
+}
+
+pub struct SocialPost {
+    pub username: String,
+    pub content: String,
+    pub reply: bool,
+    pub repost: bool,
+}
+
+impl Summary for SocialPost {
+    fn summarize(&self) -> String {
+        format!("{}: {}", self.username, self.content)
+    }
+}
+```
+Notice, after `impl`, we use the trait name, as well as the `for` keyword, indicating the type we want to implement the trait for.
+
+To use a trait, it has to be brought in scope:
+```rust
+use aggregator::{SocialPost, Summary};
+
+fn main() {
+    let post = SocialPost {
+        username: String::from("horse_ebooks"),
+        content: String::from(
+            "of course, as you probably already know, people",
+        ),
+        reply: false,
+        repost: false,
+    };
+
+    println!("1 new post: {}", post.summarize());
+}
+```
+A restriction to traits is that it can only be implemented on a type if either the trait, type or both are local to the crate. For example, we can implement standard library traits like `Display` on a custom type like `SocialPost` as part of our aggregator crate functionality because the type `SocialPost` is local to our aggregator crate. We can also implement `Summary` on `Vec<T>` in our aggregator because the trait `Summary` is local to our crate. But we can't implement external traits on external types. We can't implement `Display` trait to `Vec<T>`, because both trait and type are not local to our crate.
+
+
+##### Default implementations
+One can provide default implementations for trait methods as follows:
+```rust
+pub trait Summary {
+    fn summarize(&self) -> String {
+        String::from("(Read more...)")
+    }
+}
+
+impl Summary for NewsArticle {}
+```
+
+With an empty impl block, we use the default behaviour of the summarize function for the NewsArticle type.
+Default implementations can call other methods in the same trait, even if those other methods don't have a default implementation:
+```rust
+pub trait Summary {
+    fn summarize_author(&self) -> String;
+
+    fn summarize(&self) -> String {
+        format!("(Read more from {}...)", self.summarize_author())
+    }
+}
+```
+The type now only has to implement summarize_author, and summarize will work too.
+
+##### Traits as parameters
+Traits can be used in parameters, to indicate that a function parameter is of some type implementing the trait:
+```rust
+pub fn notify(item: &impl Summary) {
+    println!("Breaking news! {}", item.summarize());
+}
+```
+
+The example above is syntax sugar for the longer form, known as **trait bound**:
+```rust
+pub fn notify<T: Summary>(item: &T) {
+    println!("Breaking news! {}", item.summarize());
+}
+```
+Although equivalent to the snippet above, this one is more verbose.
+See the following example:
+```rust
+pub fn notify(item1: &impl Summary, item2: &impl Summary) {
+// vs.
+pub fn notify<T: Summary>(item1: &T, item2: &T) {
+```
+Impl can be used when we want the function to allow item1 and item2 to have different types, but trait bounds can be used to force the two parameters to have the same type.
+
+##### Specifying multiple trait bounds with the + syntax
+We can also specify more than one trait bound. Say we wanted notify to use display formatting as well as summarize on item: we specify in the notify definition that item must implement both Display and Summary. We can do so using the + syntax:
+```rust 
+pub fn notify(item: &(impl Summary + Display)) {
+```
+The + syntax is also valid with trait bounds on generic types:
+```rust
+pub fn notify<T: Summary + Display>(item: &T) {
+```
+With the two trait bounds specified, the body of notify can call summarize and use {} to format item.
+
+##### Clearer trait bounds with where clauses
+One can use where clauses to turn code snippets like this:
+```rust
+fn some_function<T: Display + Clone, U: Clone + Debug>(t: &T, u: &U) -> i32 {
+```
+into:
+```rust
+fn some_function<T, U>(t: &T, u: &U) -> i32
+where
+    T: Display + Clone,
+    U: Clone + Debug,
+{
+```
+
+##### Returning types that implement traits
+One can use traits as return values too:
+```rust
+fn returns_summarizable() -> impl Summary {
+    SocialPost {
+        username: String::from("horse_ebooks"),
+        content: String::from(
+            "of course, as you probably already know, people",
+        ),
+        reply: false,
+        repost: false,
+    }
+}
+```
+The ability to specify a return type only by the trait it implements is especially useful in the context of closures and iterators, which we cover in Chapter 13. Closures and iterators create types that only the compiler knows or types that are very long to specify. The impl Trait syntax lets you concisely specify that a function returns some type that implements the Iterator trait without needing to write out a very long type.
+
+You can only use impl trait if you're returning a single type, the following wouldn't work:
+```rust
+fn returns_summarizable(switch: bool) -> impl Summary {
+    if switch {
+        NewsArticle {
+            headline: String::from(
+                "Penguins win the Stanley Cup Championship!",
+            ),
+            location: String::from("Pittsburgh, PA, USA"),
+            author: String::from("Iceburgh"),
+            content: String::from(
+                "The Pittsburgh Penguins once again are the best \
+                 hockey team in the NHL.",
+            ),
+        }
+    } else {
+        SocialPost {
+            username: String::from("horse_ebooks"),
+            content: String::from(
+                "of course, as you probably already know, people",
+            ),
+            reply: false,
+            repost: false,
+        }
+    }
+}
+```
+
+### Validating references with lifetimes
+Every reference in Rust has a lifetime, which is the scope for which that reference is valid. They're usually inferred, but must be made explicit when lifetimes of references could be related in a few different ways.
+
+### Preventing dangling references with lifetimes
+```rust
+fn main() {
+    let r;
+
+    {
+        let x = 5;
+        r = &x;
+    }
+
+    println!("r: {r}");
+}
+```
+The code snippet above won't compile, as the r variable is initialized in the outer scope, declared in the inner scope using a reference, but once you leave the inner scope, the reference to the variable x becomes invalid because x is no longer in scope. Hence, borrowed value x does not "live long enough".
+
+##### Borrow checker
+The borrow checker checks lifetimes, by comparing them:
+```rust
+fn main() {
+    let r;                // ---------+-- 'a
+                          //          |
+    {                     //          |
+        let x = 5;        // -+-- 'b  |
+        r = &x;           //  |       |
+    }                     // -+       |
+                          //          |
+    println!("r: {r}");   //          |
+}                         // ---------+
+```
+
+The following refactor makes the code work:
+```rust
+fn main() {
+    let x = 5;            // ----------+-- 'b
+                          //           |
+    let r = &x;           // --+-- 'a  |
+                          //   |       |
+    println!("r: {r}");   //   |       |
+                          // --+       |
+}                         // ----------+
+```
+
+##### Generic lifetimes in functions
+Given the code:
+```rust
+fn longest(x: &str, y: &str) -> &str {
+    if x.len() > y.len() { x } else { y }
+}
+```
+gives a missing lifetime specifier error, because Rust can't tell whether the reference being returned refers to x or y. Since we don't know either, we need to implement generic lifetime parameters that define the relationship between the references so the borrow checker can perform its analysis.
+
+Lifetime annotations must start with `'` and are usually all lowercase and very short, like generic types. Most people use the name `'a` for the first lifetime annotation. We place these annotations after the `&` of a reference, using a space to separate the annotation from the type:
+```rust
+&i32        // a reference
+&'a i32     // a reference with an explicit lifetime
+&'a mut i32 // a mutable reference with an explicit lifetime
+```
+One annotation by itself doesn't have much meaning as they are meant to describe how generic lifetime parameters of multiple references relate to each other.
+```rust
+fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() > y.len() { x } else { y }
+}
+```
+This code links the return type and parameter types with lifetime annotations, making sure the lifetimes are properly defined.
+
+// TODO continue this chapter later
