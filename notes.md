@@ -1528,6 +1528,290 @@ fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
     if x.len() > y.len() { x } else { y }
 }
 ```
-This code links the return type and parameter types with lifetime annotations, making sure the lifetimes are properly defined.
+This code links the return type and parameter types with lifetime annotations, making sure the lifetimes are properly defined. It basically tells Rust that for some lifetime `'a`, the function takes two parameters, both of which are string slices that live at least as long as lifetime `'a`. The function signature also tells Rust that the string slice returned from the function will live at least as long as lifetime 'a. Practically, this means that the lifetime of the reference returned by the longest function is the same as the smaller of the lifetimes of the values referred to by the function arguments.
 
-// TODO continue this chapter later
+When returning a reference from a function, the lifetime parameter for the return type needs to match the lifetime parameter for one of the parameters. If the reference returned does not refer to one of the parameters, it must refer to a value created within this function, but this would lead to dangling references, because the value will go out of scope at the end of the function. Therefore the following won't compile:
+```rust
+fn longest<'a>(x: &str, y: &str) -> &'a str {
+    let result = String::from("really long string");
+    result.as_str()
+}
+```
+
+##### Lifetime annotations in struct definitions
+Structs can hold references, but they would all need a lifetime annotation in the struct's definition, as shown below:
+```rust
+struct ImportantExcerpt<'a> {
+    part: &'a str,
+}
+
+fn main() {
+    let novel = String::from("Call me Ishmael. Some years ago...");
+    let first_sentence = novel.split('.').next().unwrap();
+    let i = ImportantExcerpt {
+        part: first_sentence,
+    };
+}
+```
+The above means that an instance of `ImportantExcerpt` cannot outlive the reference it holds in its `part` field.
+
+##### Lifetime Elision
+Some functions don't need lifetime annotations, like the following:
+```rust
+fn first_word(s: &str) -> &str {
+    let bytes = s.as_bytes();
+
+    for (i, &item) in bytes.iter().enumerate() {
+        if item == b' ' {
+            return &s[0..i];
+        }
+    }
+
+    &s[..]
+}
+```
+
+In pre-1.0.0 versions of Rust, this wouldn't compile as each reference needed an explicit lifetime. However, since this followed a deterministic pattern, this pattern has been implemented into the Rust compiler, so that we can omit these in our code. These patterns are called lifetime elision rules. If anything is still ambiguous after applying the rules, you'll get a compile time error telling you to add lifetime annotations.
+
+The first rule, is that each parameter without lifetime annotation gets a separate one:
+```rust
+// One param
+fn foo<'a>(x: &'a i32)
+// Two params
+fn foo<'a, 'b>(x: &'a i32, y: &'b i32)
+```
+
+The second rule is that if there's exactly one input lifetime parameter, that lifetime is assigned to all output lifetime parameters:
+```rust
+fn foo<'a>(x: &'a i32) -> &'a i32
+```
+
+The third rule states that, if there are multiple input lifetime parameters, but one of them is `&self` or `&mut self` because this is a method, the lifetime of self is assigned to all output lifetime parameters. 
+
+
+##### Lifetime annotations in method definitions
+The same lifetime annotation syntax is used on methods as on functions. They always need to be declared after the `impl` keyword and then used after the struct's name ebcause those lifetimes are part of the struct's type. Due to the lifetime elision rules, lifetime annotations often are not necessary. 
+```rust
+impl<'a> ImportantExcerpt<'a> {
+    fn level(&self) -> i32 {
+        3
+    }
+}
+```
+The lifetime parameter declaration after `impl` and its use after the type name are required, but we're not required to annotate the lifetime of the reference to self because of the first elision rule. The following example shows the third elision rule being applied:
+```rust
+impl<'a> ImportantExcerpt<'a> {
+    fn announce_and_return_part(&self, announcement: &str) -> &str {
+        println!("Attention please: {announcement}");
+        self.part
+    }
+}
+```
+
+##### Static lifetime
+A special lifetime is `'static`, which denotes that the affected reference can live for the entire duration of the program. E.g. all string literals have this static lifetime:
+```rust
+let s: &'static str = "I have a static lifetime.";
+```
+
+##### Generic type parameters, trait bounds and lifetimes together
+Below you'll find an example using all three together:
+```rust
+use std::fmt::Display;
+
+fn longest_with_an_announcement<'a, T>(
+    x: &'a str,
+    y: &'a str,
+    ann: T,
+) -> &'a str
+where
+    T: Display,
+{
+    println!("Announcement! {ann}");
+    if x.len() > y.len() { x } else { y }
+}
+```
+<br>
+
+# Writing automated tests
+Rust tests usually perform the following actions:
+- Set up any needed data or state.
+- Run the code you want to test
+- Assert that the results are what you expect
+
+A test in Rust is a function that's annotated with the `test` attribute. Attributes are metadata about pieces of Rust code. One example is the derive attribute we used in structs back in chapter 5. To make a test function, add `#[test]` on the line before `fn`. When running tests using `cargo test`, Rust builds a test runner binary that runs the annotated functions and reports on whether each test function passes or fails.
+
+In the `adder_testing` crate, one can find the generated testcase. It uses the `assert_eq!` macro to check whether two things passed into it are equal.
+
+Rust has the ability to ignore tests unless specifically requested, or run only a subset of the test based on their names. Rust also has documentation tests, used to help keep the docs and the code in sync. Tests fail when they panic!, as each test is running on a different thread. The main thread marks them as failed if the thread stops.
+
+The `assert!` macro does nothing when its parameter evaluates to true, and panics when the parameter evaluates to false.
+
+As mentioned before, we can test equality with `assert_eq!` and `assert_ne!` macros. Since these macros use `==` and `!=` under the hood, variables being compared should implement `PartialEq` and `Debug` traits. Both traits are derivable traits however, and adding these is usually as straightforward as adding `#[derive(PartialEq, Debug)]` to the struct or enum definition.
+
+Any arguments passed after the initial two to compare, will be passed to the format! macro, used for custom failure messages: 
+```rust
+pub fn greeting(name: &str) -> String {
+    // format!("Hello {name}!")
+    format!("Hello")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn greeting_contains_name() {
+        let result = greeting("Carol");
+        assert!(
+            result.contains("Carol"),
+            "Greeting did not contain name, value was `{result}`"
+        );
+    }
+}
+```
+
+One can check for panics using the `should_panic` attribute. Tests with this attribute will pass if the function panics:
+```rust
+pub struct Guess {
+    value: i32,
+}
+
+impl Guess {
+    pub fn new(value: i32) -> Guess {
+        if value < 1 || value > 100 {
+            panic!("Guess value must be between 1 and 100, got {value}.");
+        }
+
+        Guess { value }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn greater_than_100() {
+        Guess::new(200);
+    }
+}
+```
+Since these tests can pass, even if the function panics for a different reason, we can use the `expected` parameter to the `should_panic` attribute:
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "less than or equal to 100")]
+    fn greater_than_100() {
+        Guess::new(200);
+    }
+}
+```
+This test will pass because the value we put in the `should_panic` attribute's `expected` parameter is a substring of the message that the `Guess::new` function panics with. If the panic does not contain the `expected` parameter's input, it fails.
+
+One can also write results using `Result<T,E>`:
+```rust
+    #[test]
+    fn it_works() -> Result<(), String> {
+        let result = add(2, 2);
+
+        if result == 4 {
+            Ok(())
+        } else {
+            Err(String::from("two plus two does not equal four"))
+        }
+    }
+```
+Writing tests like this allows you to use the `?` operator in the body of the tests, which can be a convenient way to write tests that should fail if any operation within them returns an Err variant. You however cannot use `#[should_panic]` attribute on tests using `Result<T,E>`. To assert that an operation returns an `Err` variant, don't use the `?` operator on the `Result<T,E>` value, instead, use `assert!(value.is_err())`.
+
+### Controlling how tests are run
+Some command line options go to cargo test, and some go to the resultant test binary. To separate these two types of arguments, you list the arguments that go to cargo test followed by the separator `--` and then the ones that go to the test binary. Running `cargo test --help` displays the options you can use with cargo test, and running `cargo test -- --help` displays the options you can use after the separator.
+
+When running multiple tests, they run in parallel by default. This does mean that tests can not depend on each other or on a shared state such as the current working directory or environment variables. To run tests consecutively, we use `cargo test -- --test-threads=1`.
+
+When a test passes, no output is being shown, meaning things like `println!` will be suppressed. All output is shown for tests that fail. If you want to show all output for passing tests as well, use `cargo test -- --show-output`.
+
+To run a single test, use `cargo test {test-name}`.
+To run a subset of tests, use `cargo test {string}`, where the string contains part(s) of test names. Meaning `cargo test add` will run all tests with "add" in their name.
+
+We can ignore tests unless specifically requested, by using the ignore attribute on a test:
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        let result = add(2, 2);
+        assert_eq!(result, 4);
+    }
+
+    #[test]
+    #[ignore]
+    fn expensive_test() {
+        // code that takes an hour to run
+    }
+}
+```
+Running `cargo test` will exclude this test, we can run only ignored tests by using `cargo test -- --ignored`. To run all tests regardless of whether they're ignored or not, use `cargo test -- --include-ignored`.
+
+### Test organization
+The Rust community defines two categories of tests, unit tests and integration tests. Unit tests are small and focused, testing one module in isolation at a time, and can test private interfaces. Integration tests are entirely external to your library and use your code in the same way any other external code would, using only the public interface and potentially exercising multiple modules per test.
+
+##### Unit tests
+Unit tests are put in the src directory in each file with the code that they're testing. The convention is to create a module named `tests` in each file to contain the test functions and to annotate the module with `cfg(test)`. This annotation is used for ignoring these bits of code when compiling using `cargo run`. Integration tests are not placed here, and therefore do not need this annotation.
+
+Rust's privacy rules allow private functions to be tested by unit tests also.
+
+##### Integration tests
+Integration tests are external to your library. They live in a `tests` directory, as sibling to the `src` directory. You can make as many files as you want in here. Such file looks as follows:
+```rust
+use adder::add_two;
+
+#[test]
+fn it_adds_two() {
+    let result = add_two(2);
+    assert_eq!(result, 4);
+}
+```
+Since each file is compiled into a separate crate, the library needs to be brought into every test crate's scope. Integration and doctests run only if all unit tests pass.
+
+To run a particular integration test, use `cargo test --test {name-of-file}`.
+
+One can make submodules in the tests directory, by placing them in a subdirectory:
+```
+├── Cargo.lock
+├── Cargo.toml
+├── src
+│   └── lib.rs
+└── tests
+    ├── common
+    │   └── mod.rs
+    └── integration_test.rs
+```
+
+Rust will see the mod.rs naming in the `common` subdirectory, and it will not compile them as separate crates, nor will they have sections in the test output. After creating such submodule, we can use it from any of the integration test files as module:
+```rust
+// In tests/integration_test.rs
+use adder::add_two;
+
+mod common;
+
+#[test]
+fn it_adds_two() {
+    common::setup();
+
+    let result = add_two(2);
+    assert_eq!(result, 4);
+}
+```
+
+##### Integration for binary crates
+If our project is a binary crate that only contains a src/main.rs file and doesn’t have a src/lib.rs file, we can’t create integration tests in the tests directory and bring functions defined in the src/main.rs file into scope with a use statement. Only library crates expose functions that other crates can use; binary crates are meant to be run on their own.
+
+This is one of the reasons Rust projects that provide a binary have a straightforward src/main.rs file that calls logic that lives in the src/lib.rs file. Using that structure, integration tests can test the library crate with use to make the important functionality available. If the important functionality works, the small amount of code in the src/main.rs file will work as well, and that small amount of code doesn’t need to be tested.
+
